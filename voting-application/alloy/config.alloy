@@ -1,0 +1,255 @@
+local.file "endpoints" {
+    filename = "/etc/alloy/endpoints.json"
+}
+
+
+loki.source.api "votting" {
+    http {
+        listen_address = "0.0.0.0"
+        listen_port = "3100"
+    }
+    forward_to = [loki.process.votting.receiver]
+}
+
+loki.process "votting" {
+    stage.regex {
+        expression=`^.*?loggedtime=(?P<loggedtime>\S+)`
+    }
+    stage.timestamp {
+        source = "loggedtime"
+        format = "2006-01-02T15:04:05.000Z07:00"
+    }
+    forward_to = [loki.write.votting.receiver]
+}
+
+loki.write "votting" {
+    endpoint {
+        url = json_path(local.file.endpoints.content, ".logs.url")[0]
+        basic_auth {
+            username = json_path(local.file.endpoints.content, ".logs.basicAuth.username")[0]
+            password = json_path(local.file.endpoints.content, ".logs.basicAuth.password")[0]
+        }
+    }
+}
+
+////////mimir 
+
+prometheus.scrape "mltpg_infra" {
+    targets = [
+        {"__address__" = "mimir:9009", group = "infrastructure", service = "mimir"},
+        {"__address__" = "tempo:3200", group = "infrastructure", service = "tempo"},
+        {"__address__" = "loki:3100", group = "infrastructure", service = "loki"},
+        {"__address__" = "grafana:3000", group = "infrastructure", service = "grafana"},
+        {"__address__" = "votting-app-database:5432 ", group = "infrastructure", service = "votting-app-database"},
+    ]
+    scrape_interval = "15s"
+    forward_to = [prometheus.remote_write.mimir.receiver]
+    job_name = "mltpg_infra"
+}
+
+prometheus.scrape "votting" {
+    targets = [
+        {"__address__" = "votting-app-server:4000", group = "votting", service = "votting-app-server"},
+        {"__address__" = "votting-app-client:3001", group = "votting", service = "votting-app-client"},
+    ]
+    scrape_interval = "2s"
+    scrape_timeout = "2s"
+    forward_to = [prometheus.remote_write.mimir.receiver]
+    job_name = "server"
+}
+
+prometheus.scrape "alloy" {
+    targets = [{"__address__" = "localhost:12345", group = "infrastructure", service = "alloy"}]
+    forward_to = [prometheus.remote_write.mimir.receiver]
+    job_name = "alloy"
+}
+
+prometheus.exporter.unix "default" {
+}
+
+prometheus.scrape "unix" {
+    targets = prometheus.exporter.unix.default.targets
+    forward_to = [prometheus.remote_write.mimir.receiver]
+    job_name = "node_exporter"
+}
+
+prometheus.remote_write "mimir" {
+    endpoint {
+        url = json_path(local.file.endpoints.content, ".metrics.url")[0]
+        basic_auth {
+            username = json_path(local.file.endpoints.content, ".metrics.basicAuth.username")[0]
+            password = json_path(local.file.endpoints.content, ".metrics.basicAuth.password")[0]
+        }
+    }
+}
+
+
+
+/////////Tempo 
+
+otelcol.receiver.otlp "otlp_receiver" {
+    grpc {
+        endpoint = "0.0.0.0:4317"
+    }
+    output {
+        traces = [
+            otelcol.processor.batch.default.input,
+            otelcol.connector.spanlogs.autologging.input,
+        ]
+    }
+}
+
+otelcol.processor.batch "default" {
+    send_batch_size = 1000
+    send_batch_max_size = 2000
+    timeout = "2s"
+    output {
+        traces = [otelcol.exporter.otlp.tempo.input]
+    }
+}
+
+otelcol.exporter.otlp "tempo" {
+    client {
+        auth = otelcol.auth.headers.tempo.handler
+        endpoint = json_path(local.file.endpoints.content, ".traces.url")[0]
+        tls {
+            insecure = json_path(local.file.endpoints.content, ".traces.tls.insecure")[0]
+            insecure_skip_verify = json_path(local.file.endpoints.content, ".traces.tls.insecureSkipVerify")[0]
+        }
+    }
+}
+
+otelcol.auth.headers "tempo" {
+    header {
+        key = "Authorization"
+        value = join(["Basic ", json_path(local.file.endpoints.content, ".traces.basicAuthToken")[0]], "")
+    }
+}
+
+otelcol.connector.spanlogs "autologging" {
+    spans = false
+    roots = true
+    processes = false
+    span_attributes = [ "http.method", "http.target", "http.status_code" ]
+    overrides {
+        trace_id_key = "traceId"
+    }
+    output {
+        logs = [otelcol.exporter.loki.autologging.input]
+    }
+}
+
+otelcol.exporter.loki "autologging" {
+    forward_to = [loki.process.autologging.receiver]
+}
+
+loki.process "autologging" {
+    forward_to = [loki.write.autologging.receiver]
+
+    stage.json {
+        expressions = {
+            body = "body",
+        }
+    }
+
+    stage.regex {
+        expression = "span=\"?(?P<span>[^\"]+)\"?\\s+dur=(?P<dur>\\d+)ns\\s+(?:http\\.method=(?P<http_method>\\w+)\\s+http\\.target=(?P<http_target>[^\\s]+)\\s+http\\.status_code=(?P<http_status_code>\\d+)\\s+)?svc=(?P<svc>[^\\s]+)\\s+traceId=(?P<traceId>[a-f0-9]+)"
+        source = "body"
+    }
+
+    stage.structured_metadata {
+        values = {
+            trace_id         = "traceId",
+            service          = "svc",
+            duration_ns      = "dur",
+            span             = "span",
+            http_method      = "http_method",
+            http_target      = "http_target",
+            http_status_code = "http_status_code",
+        }
+    }
+
+    stage.output {
+        source = "{{ .time }} | svc={{ .svc }} | traceId={{ .traceId }} | span={{ .span }} | duration_ns={{ .dur }}{{ if .http_method }} | http.method={{ .http_method }} http.target={{ .http_target }} http.status_code={{ .http_status_code }}{{ end }}"
+    }
+}
+
+loki.write "autologging" {
+    external_labels = {
+        job = "alloy",
+    }
+
+    endpoint {
+        url = json_path(local.file.endpoints.content, ".logs.url")[0]
+        basic_auth {
+            username = json_path(local.file.endpoints.content, ".logs.basicAuth.username")[0]
+            password = json_path(local.file.endpoints.content, ".logs.basicAuth.password")[0]
+        }
+    }
+}
+
+
+otelcol.processor.tail_sampling "errors" {
+    decision_wait = "30s"
+    policy {
+        name = "sample-erroring-traces"
+        type = "status_code"
+        status_code {
+            status_codes = [ "ERROR" ]
+        }
+    }
+    policy {
+        name = "sample-long-traces"
+        type = "latency"
+        latency {
+            threshold_ms = 200
+        }
+    }
+    output {
+        traces = [otelcol.processor.batch.default.input]
+    }
+}
+
+otelcol.connector.spanmetrics "tracemetrics" {
+    namespace = "traces.spanmetrics"
+    dimension {
+        name = "http.method"
+    }
+    dimension {
+        name = "http.target"
+    }
+    dimension {
+        name = "http.status_code"
+    }
+    dimension {
+        name = "service.version"
+    }
+    histogram {
+        explicit {
+        }
+    }
+    exemplars {
+        enabled = true
+    }
+    output {
+        metrics = [otelcol.exporter.prometheus.tracemetrics.input]
+    }
+}
+
+otelcol.connector.servicegraph "tracemetrics" {
+    dimensions = [
+        "http.method",
+        "http.target",
+        "http.status_code",
+        "service.version",
+    ]
+    output {
+        metrics = [otelcol.exporter.prometheus.tracemetrics.input]
+    }
+}
+
+otelcol.exporter.prometheus "tracemetrics" {
+    forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+///////////////////
