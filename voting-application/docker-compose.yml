@@ -144,21 +144,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     networks:
       - voting-app-network
-  
-  
-  graphite:
-    image: graphiteapp/graphite-statsd:latest
-    container_name: graphite
-    ports:
-      - "8081:80" 
-      - "2003-2004:2003-2004"
-      - "8125:8125/udp" 
-    environment:
-      - GRAPHITE_TIME_ZONE=UTC
-    volumes:
-      - graphite-data:/opt/graphite/storage
-    networks:
-      - voting-app-network
+
  
  
  
@@ -217,6 +203,21 @@ services:
       - "8125:8125"
     networks:
       - voting-app-network
+
+
+  k6:
+    image: grafana/k6:0.53.0
+    volumes:
+      - "./k6:/scripts"
+    environment:
+      - K6_PROMETHEUS_RW_SERVER_URL=http://mimir:9009/api/v1/push
+      - K6_DURATION=3600s
+      - K6_VUS=4
+      - K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=true
+    restart: always
+    command: ["run", "-o", "experimental-prometheus-rw", "/scripts/mythical-loadtest.js"]
+
+
 
 networks:
   voting-app-network:
