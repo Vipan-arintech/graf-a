@@ -1,30 +1,28 @@
 {
-
     "logs": {
-        "url": "http://loki:3100/loki/api/v1/push",
+        "url": "https://logs-prod-028.grafana.net/loki/api/v1/push",
         "basicAuth": {
-            "username": "",
-            "password": ""
+            "username": "1095920",
+            "password": "glc_eyJvIjoiMTMxODAyMCIsIm4iOiJzdGFjay0xMTM4MTQxLWhsLXdyaXRlLWxva2kwIiwiayI6IjM5eTdpM2x2U1h4OEU3QmFWSDR1NDgzSSIsIm0iOnsiciI6InByb2QtYXAtc291dGgtMSJ9fQ=="
         }
     },
     "metrics": {
-        "url": "http://mimir:9009/api/v1/push",
+        "url": "https://prometheus-prod-43-prod-ap-south-1.grafana.net/api/prom/push",
         "basicAuth": {
-            "username": "",
-            "password": ""
+            "username": "1993332",
+            "password": "glc_eyJvIjoiMTMxODAyMCIsIm4iOiJzdGFjay0xMTM4MTQxLWhtLXdyaXRlLXByb20xIiwiayI6Im1XMncxSDAzdWh5Mm1jTDZTeDM3TTNDMyIsIm0iOnsiciI6InByb2QtYXAtc291dGgtMSJ9fQ=="
         }
     },
     "traces": {
-        "url": "http://tempo:4317",
-        "basicAuthToken": "",
-        "tls": {
-            "insecure": true,
-            "insecureSkipVerify": true
+        "url": "tempo-prod-19-prod-ap-south-1.grafana.net:443",
+        "basicAuth": {
+            "username": "1090235",
+            "password": "glc_eyJvIjoiMTMxODAyMCIsIm4iOiJzdGFjay0xMTM4MTQxLWh0LXdyaXRlLXRtcCIsImsiOiJsMTAxSDQ3dWlhRGhGazhOcEw2NDQ2WXUiLCJtIjp7InIiOiJwcm9kLWFwLXNvdXRoLTEifX0="
         }
+            
     }
+
 }
-
-
 
 
 
