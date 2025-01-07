@@ -110,20 +110,14 @@ otelcol.processor.batch "default" {
 
 otelcol.exporter.otlp "tempo" {
     client {
-        auth = otelcol.auth.headers.tempo.handler
+        auth = otelcol.auth.basic.grafanacloud.handler
         endpoint = json_path(local.file.endpoints.content, ".traces.url")[0]
-        tls {
-            insecure = json_path(local.file.endpoints.content, ".traces.tls.insecure")[0]
-            insecure_skip_verify = json_path(local.file.endpoints.content, ".traces.tls.insecureSkipVerify")[0]
-        }
     }
 }
 
-otelcol.auth.headers "tempo" {
-    header {
-        key = "Authorization"
-        value = join(["Basic ", json_path(local.file.endpoints.content, ".traces.basicAuthToken")[0]], "")
-    }
+otelcol.auth.basic "grafanacloud" {
+  username = json_path(local.file.endpoints.content, ".traces.basicAuth.username")[0]
+  password = json_path(local.file.endpoints.content, ".traces.basicAuth.password")[0]
 }
 
 otelcol.connector.spanlogs "autologging" {
@@ -144,7 +138,7 @@ otelcol.exporter.loki "autologging" {
 }
 
 loki.process "autologging" {
-    forward_to = [loki.write.autologging.receiver]
+    forward_to = [loki.write.votting.receiver]
 
     stage.json {
         expressions = {
@@ -174,19 +168,6 @@ loki.process "autologging" {
     }
 }
 
-loki.write "autologging" {
-    external_labels = {
-        job = "alloy",
-    }
-
-    endpoint {
-        url = json_path(local.file.endpoints.content, ".logs.url")[0]
-        basic_auth {
-            username = json_path(local.file.endpoints.content, ".logs.basicAuth.username")[0]
-            password = json_path(local.file.endpoints.content, ".logs.basicAuth.password")[0]
-        }
-    }
-}
 
 
 otelcol.processor.tail_sampling "errors" {
